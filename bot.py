@@ -2,12 +2,13 @@ import os
 import logging
 from datetime import datetime
 from http import HTTPStatus
+from contextlib import asynccontextmanager
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
-)bggjhkj.l
+)
 
 from config import BOT_TOKEN, ADMIN_IDS
 from database import (
@@ -371,22 +372,6 @@ async def healthz(request: Request):
     return Response(content="Bot is running!", media_type="text/plain")
 
 
-async def startup():
-    """Set webhook when the app starts."""
-    port = int(os.environ.get("PORT", 10000))
-    external_url = os.environ.get("RENDER_EXTERNAL_URL", f"http://0.0.0.0:{port}")
-    webhook_url = f"{external_url}/telegram"
-    logger.info(f"Setting webhook to: {webhook_url}")
-    await bot.bot.set_webhook(url=webhook_url, allowed_updates=Update.ALL_TYPES)
-    logger.info("✅ Webhook set successfully!")
-
-
-async def shutdown():
-    """Remove webhook when shutting down."""
-    logger.info("Removing webhook...")
-    await bot.bot.delete_webhook()
-
-
 # =================== INIT BOT ===================
 
 logger.info("Initializing bot...")
@@ -412,7 +397,25 @@ bot.add_handler(MessageHandler(
 logger.info("✅ Bot initialized!")
 
 
-# =================== STARLETTE APP ===================
+# =================== STARLETTE APP WITH LIFESPAN ===================
+
+@asynccontextmanager
+async def lifespan(app):
+    """Handle startup and shutdown."""
+    # --- STARTUP ---
+    port = int(os.environ.get("PORT", 10000))
+    external_url = os.environ.get("RENDER_EXTERNAL_URL", f"http://0.0.0.0:{port}")
+    webhook_url = f"{external_url}/telegram"
+    logger.info(f"Setting webhook to: {webhook_url}")
+    await bot.bot.set_webhook(url=webhook_url, allowed_updates=Update.ALL_TYPES)
+    logger.info("✅ Webhook set successfully!")
+    
+    yield  # App runs here
+    
+    # --- SHUTDOWN ---
+    logger.info("Removing webhook...")
+    await bot.bot.delete_webhook()
+
 
 app = Starlette(
     routes=[
@@ -420,8 +423,7 @@ app = Starlette(
         Route("/healthz", healthz, methods=["GET"]),
         Route("/", healthz, methods=["GET"]),
     ],
-    on_startup=[startup],
-    on_shutdown=[shutdown],
+    lifespan=lifespan,
 )
 
 
